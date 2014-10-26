@@ -1,0 +1,124 @@
+---
+author: <div align="right">R. Edward Stern</div>
+date: <div align="right">10/6/2014</div>
+title: <div align="center">Data Analysis of Storm Event Effects <br/> Population Health & Economic Consequences</div>
+
+output: html_document
+---
+
+
+### Synopsis
+
+This report presents the storm events which have either caused the most damage or most affected the overall health of the population in the years between 1950 and 2011.  During download and extraction, only the columns of interest are chosen date, event type, health: fatalities; injuries, and economic:propdmg;cropdmg. Event types are grouped into similar types.  Additional fields are calculated: totalling population and damage, as well as extracting the year in a date format.  
+
+The data are then aggregated and sorted as two sets (economic and population).  The data are then placed into pivot tables.  These are then displayed as graphs showing the breakdown of the effects on population (fatalities and injuries) and damage (property and crop damage).
+
+
+### 1. Data Processing
+#### 1.1 Load Libraries
+The lubridate package allows for easier date handling, in particular extracting the year.
+```{r, echo=TRUE}
+library(lubridate)
+```
+#### 1.2 Download & Extract Data
+The data files was downloaded once and and is now checked into the repository.  I therefore have commented out the downloadfile step.  Only the columns of interest are read.  I subset the data to exclude any zero values in the numeric columns of concern.
+```{r, echo=TRUE}
+url = "http://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+#download.file(url, temp)
+fname = "StormData.csv"
+stormcols <- c('EVTYPE', 'BGN_DATE', 'END_DATE','STATE', 'FATALITIES', 'INJURIES', 'PROPDMG', 'CROPDMG')
+storm_data <- read.csv("StormData.csv.bz2")[ ,stormcols]
+storm_data <- subset(storm_data, FATALITIES > 0| INJURIES > 0 | PROPDMG > 0 | CROPDMG > 0)
+```
+#### 1.3 Add Calculated Columns
+##### 1.3.1 Normalised Events
+Because the data was added by many different observers there were duplicated names.  I used grep to search for the core names and merged items toghether after an exploration of the data.  One of the surprises was that "tropical storm X" caused enough damage to be in the top ten, but once the sets were merged, it dropped away.
+An area of further study would be to find a simple set of rules to normalise the events and provide a verification of the results.
+
+```{r, echo=TRUE}
+storm_data[grep("heat", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "heat"
+storm_data[grep("tornado", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "tornado"
+storm_data[grep("wind", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "wind"
+storm_data[grep("heat", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "heat"
+storm_data[grep("tropical", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "tropical"
+storm_data[grep("snow", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "snow"
+storm_data[grep("cold", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "cold"
+storm_data[grep("lightning", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "thunderstorm"
+storm_data[grep("thunder storm", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "thunderstorm"
+storm_data[grep("flood", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "flood"
+storm_data[grep("ice", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "ice"
+storm_data[grep("winter", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "winter"
+storm_data[grep("hail", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "hail"
+storm_data[grep("hurricane", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "typhoon"
+storm_data[grep("typhoon", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "typhoon"
+storm_data[grep("tsunami", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "tsunami"
+storm_data[grep("fire", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "fire"
+storm_data[grep("blizzard", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "blizzard"
+storm_data[grep("surf", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "surf"
+storm_data[grep("dust", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "dust storm"
+storm_data[grep("landslide", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "landslide"
+storm_data[grep("cold", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "cold"
+storm_data[grep("rain", tolower(storm_data$EVTYPE)) ,"NORM_EVT"] <- "rain"
+```
+
+##### 1.3.2 Year, Population, Damage
+I extracted the YEAR from the beginning date of the event.  I did not compare the duration of the event relative to the damage, as I wanted to summarize the data only.  This presents an interesting topic of further discussion.  The total population harm and property damage was added.  This enables a check of the values after the graph is complete.
+
+```{r, echo=TRUE}
+storm_data[,"YEAR"] <- year(as.Date(as.character(storm_data[,"BGN_DATE"]), "%m/%d/%Y"))
+storm_data[ ,c("POP", "DMG")] <- c(rowSums(storm_data[ ,c("FATALITIES", "INJURIES")]), rowSums(storm_data[ ,c("PROPDMG", "CROPDMG")]))
+```
+
+
+#### 1.4 Aggregate Values
+
+Here the data are split into either population or economic harms.  The top 10 normalized event types of each over the 60 year duration are then selected.
+
+```{r, echo=TRUE}
+sum_storms <- aggregate(cbind(FATALITIES, INJURIES, PROPDMG, CROPDMG, POP, DMG) ~ NORM_EVT,data = storm_data,FUN=sum, na.rm=TRUE)
+sum_pop <- sum_storms[with(sum_storms, order(-POP)), c("NORM_EVT", "POP", "FATALITIES", "INJURIES")]
+top.pop <- sum_pop[1:10, ]
+sum_dmg <- sum_storms[with(sum_storms, order(-DMG)), c("NORM_EVT", "DMG", "PROPDMG", "CROPDMG")]
+top.dmg <- sum_dmg[1:10, ]
+```
+
+#### 1.4 Create Tables
+
+In order to show the data as a stacked barchart in base R, it was necessary to create pivot tables of the data.
+
+##### 1.4.1 Population 
+
+```{r, echo=TRUE}
+pop.x <- rbind(top.pop$FATALITIES, top.pop$INJURIES)
+rownames(pop.x)<-c("FATAILITIES", "INJURIES")
+colnames(pop.x) <- top.pop$NORM_EVT
+
+```
+##### 1.4.2 Economic
+
+```{r, echo=TRUE}
+dmg.x <- rbind(top.dmg$PROPDMG, top.dmg$CROPDMG)
+rownames(dmg.x)<-c("PROPDMG", "CROPDMG")
+colnames(dmg.x) <- top.dmg$NORM_EVT
+```
+### 2. Results
+
+#### 2.1 Population Health
+
+The tornado/wind event types caused the most damage over all to both the population and to economics.  It is interesting to note that the coastal type event typhoon caused far fewer injuries, no fatalities and did not factor into property damage.  It might be interesting to develop better protection against tornado and wind events.  One interesting idea would be to further research whether the damage and population effects have been reduced over the 60 years of measurement and see if there are improvments which correlate to the reduced effects.
+
+```{r, echo=TRUE}
+pop.bar <- barplot(pop.x/1000, main="Effect of Events on Population Health",   
+                   col=c("black", "red"), las=3, ylab="Population in Thousands", names.arg=rep("",each=10));
+text(pop.bar, par("usr")[3] - 0.025, srt = 45, adj = 1, 
+     labels =colnames(pop.x), 
+     xpd = TRUE, font = 2)
+```
+
+#### 2.2 Economic Consequences
+```{r, echo=TRUE}
+dmg.bar <- barplot(dmg.x/1000, main="Economic Consequence of Storm Events", col=c("black", "green"), las=3, 
+ylab="Damage in $1000s", names.arg=rep("", each=10))
+text(dmg.bar, par("usr")[3] - 0.025, srt=45, adj=1, labels = colnames(dmg.x), xpd = TRUE, font = 2)
+```
+
